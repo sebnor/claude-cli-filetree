@@ -142,11 +142,15 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       return
     }
     // Dropped left of the pane: the file is referenced in the prompt. Anywhere else: cancelled.
+    // The release alone decides, so a drop works where no moves arrive while the button is
+    // held (a terminal or multiplexer that reports presses and releases only).
     if (event.type === 'up') {
-      const drag = state.drag
-      if (!state.pressed && !drag) return
-      set({ ...state, pressed: undefined, drag: undefined, lastClick: drag ? undefined : state.lastClick })
-      const row = drag && event.x < 0 ? rows[drag.row] : undefined
+      const { pressed, drag } = state
+      if (!pressed && !drag) return
+      const from = drag?.row ?? pressed?.row
+      const isDrop = event.x < 0 && (drag !== undefined || (pressed !== undefined && pressed.x - event.x >= DRAG_CELLS))
+      set({ ...state, pressed: undefined, drag: undefined, lastClick: isDrop ? undefined : state.lastClick })
+      const row = isDrop && from !== undefined ? rows[from] : undefined
       if (row) act(row[0], 'insert')
       return
     }

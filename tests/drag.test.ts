@@ -55,6 +55,15 @@ test('dragging a file out of the pane and releasing references it in the prompt'
   expect(await header()).toContain('collapse all')
 })
 
+test('with no moves reported while held, a release left of the pane still drops the file', async ($, on) => {
+  const { filled, pointer } = await mount($, on)
+
+  await pointer('down', 6, 3)
+  await pointer('up', -12, 9)
+
+  expect(filled).toEqual(['@README.md '])
+})
+
 test('a drag released back inside the pane is cancelled', async ($, on) => {
   const { filled, pointer, header } = await mount($, on)
 

@@ -79,6 +79,7 @@ With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and cl
 - One drawing shows at most 1,500 rows; collapse folders past that.
 - Line counts for untracked files are read for at most 200 files per refresh; binary files count as 0.
 - In a folder of projects, up to 200 visible folders are checked for a repository of their own.
+- Dragging a file needs the terminal to pass a held-button drag on to Claude Code. Some terminal multiplexers keep it for their own text selection, and then nothing is dropped; the drop needs only the release, so a terminal that reports presses and releases is enough. Inside such a multiplexer, use **Insert path** from the right-click menu instead.
 
 ## Privacy
 
