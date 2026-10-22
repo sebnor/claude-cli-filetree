@@ -26,6 +26,9 @@ export type TreeProps = {
   isPinned: boolean
   canGoUp: boolean
   here?: string
+  /** The first of the region's rows the pane shows, and how many it shows: the drawn window. */
+  offset: number
+  bodyRows: number
 }
 export type TreeAction =
   | 'toggle' | 'insert' | 'edit' | 'open' | 'refresh' | 'collapse' | 'new-md' | 'open-vscode' | 'up' | 'sync'
@@ -56,6 +59,10 @@ const DOUBLE_CLICK_MS = 400
 const DRAG_CELLS = 2
 // The title and the header actions sit above the first row.
 const HEADER_ROWS = 2
+// Rows drawn beyond the window on each side, so a scroll shows rows while the next draw comes;
+// and the most drawn at once, which keeps a drawing well under its 100,000 characters.
+const WINDOW_MARGIN = 20
+const MAX_DRAWN_ROWS = 110
 const HEADER_GAP = 2
 
 // The header's actions as drawn, each with the column it starts at: ↑ up while there is a folder
@@ -110,7 +117,12 @@ const placeMenu = (menu: Menu, items: readonly MenuItem[], columns: number, heig
 // though they never cross as `undefined` (register.tsx leaves an absent field out).
 const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
   const { Box, Text } = surface.elements
-  const { root, summary, rows, icons, isPinned, canGoUp, here } = props as unknown as TreeProps
+  const { root, summary, rows, icons, isPinned, canGoUp, here, offset, bodyRows } = props as unknown as TreeProps
+  // Only the rows around the pane's window are drawn: a drawing over 100,000 characters unmounts
+  // the region, and a row is some 500 of them. Empty Boxes keep the rest's height, so the rows
+  // drawn sit where they belong and a click's row is still `y` less the header.
+  const first = Math.max(0, offset - HEADER_ROWS - WINDOW_MARGIN)
+  const last = Math.min(rows.length, first + Math.min(MAX_DRAWN_ROWS, bodyRows + 2 * WINDOW_MARGIN))
   const header = headerActions(canGoUp, isPinned)
   // The region fills the pane body (register.tsx sizes it), so a click on the empty room below
   // the rows reaches it too; at least as tall as the rows and a menu under the last one.
@@ -230,8 +242,9 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       else if (event.key === 'q' || event.key === 'left' || event.key === 'backspace') set({ ...state, menu: undefined })
       return
     }
-    // Backspace moves the tree's top up a folder (pinning it); `s` brings it back in sync.
-    if (event.key === 'backspace' && canGoUp) return act('', 'up')
+    // `u` moves the tree's top up a folder (pinning it), once per press: the hooks module drops a
+    // held key's repeats (`path: 'key'`). `s` brings it back in sync.
+    if (event.key === 'u' && canGoUp) return act('key', 'up')
     if (event.key === 's' && isPinned) return act('', 'sync')
     const row = rows[cursor]
     if (event.key === 'up') set({ cursor: Math.max(0, cursor - 1), hasSelection: true })
@@ -272,7 +285,9 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
         </Text>
       )}
       {rows.length === 0 && <Text dimColor>(empty)</Text>}
-      {rows.map(([path, prefix, kind, mark], index) => {
+      {first > 0 && <Box height={first} />}
+      {rows.slice(first, last).map(([path, prefix, kind, mark], at) => {
+        const index = first + at
         const name = baseName(path) + (kind === 'f' ? '' : '/')
         const marker = kind === 'o' ? '▾ ' : kind === 'd' ? '▸ ' : '  '
         const isMarked = menu ? menu.row === index : state.hasSelection && cursor === index
@@ -314,6 +329,7 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
           </Box>
         )
       })}
+      {last < rows.length && <Box height={rows.length - last} />}
       {menu && place && (
         <Box
           position="absolute"

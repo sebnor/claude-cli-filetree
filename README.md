@@ -55,6 +55,7 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | Action | Result |
 | --- | --- |
 | `/files` | Show or hide the pane |
+| `/files sync` | Put the tree back on the session's working directory, whatever state the pane is in |
 | Left click on a folder | Open or close it |
 | Left click on a file | Select it |
 | Double click on a file | Open it: images in the system's default viewer, everything else in your editor |
@@ -67,7 +68,7 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | **↻ sync** (while pinned) | Back in sync with the session's working directory; folders open below it stay open |
 | **refresh**, **collapse all** | Re-read the tree and git status; close every folder |
 
-With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu, Backspace moves up, `s` syncs. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
+With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu, `u` moves up (once per press – holding it does not climb on), `s` syncs. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
 
 **New .md file** opens a name box at the top of the pane. A name without an extension gets `.md` (`notes` → `notes.md`), one with an extension keeps it, and `docs/today` creates the subfolder too. An empty name takes the suggested `file.md` (or `file-1.md`, ... when taken). A name that exists or holds characters a file name cannot is refused in the box. **cancel** closes it.
 
@@ -81,7 +82,7 @@ With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and cl
 
 ## Limits
 
-- One drawing shows at most 1,500 rows; collapse folders past that.
+- One drawing shows at most 1,500 rows (fewer with very long names); collapse folders past that. Only the rows around the visible part of the pane are drawn, so a long tree scrolls without slowing down.
 - Line counts for untracked files are read for at most 200 files per refresh; binary files count as 0.
 - In a folder of projects, up to 200 visible folders are checked for a repository of their own.
 - Dragging a file needs the terminal to pass a held-button drag on to Claude Code. Some terminal multiplexers keep it for their own text selection, and then nothing is dropped; the drop needs only the release, so a terminal that reports presses and releases is enough. Inside such a multiplexer, use **Insert path** from the right-click menu instead.

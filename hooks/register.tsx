@@ -316,27 +316,53 @@ async function whereOf($: EngineInterface, root: string): Promise<Where> {
   return { isPinned, canGoUp: parentOf(root) !== undefined, ...(here ? { here } : {}) }
 }
 
-const treeProps = (root: string, where: Where, status: GitStatus, rows: Row[], icons: boolean): TreeProps => ({
+// A Client's props may serialize to 100,000 characters at most, or the surface unmounts it, header
+// and all. The rows get this much of it; the rest of the props are a few hundred at most.
+const ROWS_BUDGET = 90_000
+
+/** The rows as the tree view takes them, as many as fit the budget, and whether some were cut. */
+function fitRows(rows: readonly Row[]): { rows: TreeProps['rows']; isCut: boolean } {
+  const fitted: TreeProps['rows'] = []
+  let used = 2
+  for (const row of rows) {
+    const kind = row.isDir ? (row.isOpen ? 'o' : 'd') : 'f'
+    const tuple: TreeProps['rows'][number] = row.mark ? [row.path, row.prefix, kind, row.mark] : [row.path, row.prefix, kind]
+    used += JSON.stringify(tuple).length + 1
+    if (used > ROWS_BUDGET) return { rows: fitted, isCut: true }
+    fitted.push(tuple)
+  }
+
+  return { rows: fitted, isCut: false }
+}
+
+/** The window the pane shows of the tree view's region: its first row and how many. */
+type Window = { offset: number; bodyRows: number }
+
+const treeProps = (root: string, where: Where, status: GitStatus, rows: TreeProps['rows'], icons: boolean, window: Window): TreeProps => ({
   root: nameOf(root),
   ...where,
   summary: summaryOf(status),
   icons,
-  rows: rows.map(row => {
-    const kind = row.isDir ? (row.isOpen ? 'o' : 'd') : 'f'
-    return row.mark ? [row.path, row.prefix, kind, row.mark] : [row.path, row.prefix, kind]
-  }),
+  rows,
+  ...window,
 })
+
+// A held key repeats far faster than this; a person pressing again waits longer.
+const KEY_REPEAT_MS = 400
 
 export const register: Register = (on, options) => {
   // Nerd Font icons, unless the person's terminal font has none (the `icons` option).
   const icons = options.icons !== false
   let lastSignature: string | undefined
   let isPolling = false
+  // When the last `u` arrived: a key held down sends one up, its repeats are dropped.
+  let lastUpKeyAt = 0
 
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'files',
-      description: 'Show or hide the file tree of the working directory',
+      description: 'Show or hide the file tree of the working directory; `sync` puts its top back on the cwd',
+      argumentHint: '[sync]',
     })
     void $.ui.open({ id: PANE, title: TITLE })
     void refreshGit($)
@@ -359,7 +385,13 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: 'files' }, async $ => {
+  on('command.run', { command: 'files' }, async ($, e) => {
+    // The way back from anywhere, the pane drawn or not: in sync with the cwd, pane open.
+    if (e.args.trim() === 'sync') {
+      await sync($)
+      await $.ui.open({ id: PANE, title: TITLE })
+      return { text: 'File tree back in sync with the working directory.' }
+    }
     const isUp = (await $.ui.panes()).some(pane => pane.id === PANE)
     if (isUp) {
       await $.ui.close({ id: PANE })
@@ -392,8 +424,13 @@ export const register: Register = (on, options) => {
     else if (action === 'collapse') await collapseAll($)
     else if (action === 'new-md') await openNewFile($, path)
     else if (action === 'open-vscode') void openFolderInVsCode($, path)
-    else if (action === 'up') await moveUp($)
-    else if (action === 'sync') await sync($)
+    else if (action === 'up') {
+      // From the keyboard, one step per press: a held key's repeats arrive closer than a person presses.
+      const now = Date.now()
+      const isRepeat = path === 'key' && now - lastUpKeyAt < KEY_REPEAT_MS
+      if (path === 'key') lastUpKeyAt = now
+      if (!isRepeat) await moveUp($)
+    } else if (action === 'sync') await sync($)
 
     return {}
   })
@@ -412,8 +449,10 @@ export const register: Register = (on, options) => {
     const Client = e.surface === 'desktop' || e.surface === 'terminal' ? $.ui.resolve(e).Client : undefined
     const hasPointer = Client !== undefined && (e.surface === 'desktop' || e.viewport?.isFullscreen === true)
     const summary = summaryOf(context.status)
-    const more = rows.length >= MAX_ROWS && (
-      <Text dimColor>… more than {MAX_ROWS} entries, collapse some folders</Text>
+    // Too many rows for one drawing (by count, or by size for the tree view): the first ones show.
+    const fitted = fitRows(rows)
+    const more = (rows.length >= MAX_ROWS || (hasPointer && fitted.isCut)) && (
+      <Text dimColor>… more entries than fit, collapse some folders</Text>
     )
 
     // The name box of **New .md file**, above the tree while open. A surface with no text field
@@ -449,11 +488,11 @@ export const register: Register = (on, options) => {
     // With a pointer the tree view draws the whole body, header included, and fills the pane,
     // so every click in the sidebar reaches it (a click on no row clears the selection).
     if (hasPointer) {
-      const height = Math.max(rows.length + 2, e.props.scroll.bodyRows - (more ? 1 : 0) - boxRows)
+      const height = Math.max(fitted.rows.length + 2, e.props.scroll.bodyRows - (more ? 1 : 0) - boxRows)
       return (
         <Box flexDirection="column">
           {nameBox}
-          <Client key="tree" module="./tree-view.tsx" props={treeProps(top, where, context.status, rows, icons)} width={width} height={height} />
+          <Client key="tree" module="./tree-view.tsx" props={treeProps(top, where, context.status, fitted.rows, icons, { offset: Math.max(0, e.props.scroll.offset - boxRows), bodyRows: e.props.scroll.bodyRows })} width={width} height={height} />
           {more}
         </Box>
       )

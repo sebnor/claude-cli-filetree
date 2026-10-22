@@ -50,7 +50,9 @@ const mount = async ($: Parameters<TestBody>[0], on: On) => {
   const click = (index: number, button: 'left' | 'right' = 'left') =>
     ui.pointer({ type: 'down', x: 8, y: index + 2, button, in: 'tree' })
   const opened = () => ran.filter(argv => argv[0] !== 'git')
-  return { ui, filled, opened, drawn, key, click }
+  // ↑ up in the header: the first action, from column 0.
+  const up = () => ui.pointer({ type: 'down', x: 1, y: 1, button: 'left', in: 'tree' })
+  return { ui, filled, opened, drawn, key, click, up }
 }
 
 test('in sync, the tree shows the cwd: no pinned mark and no sync action', async ($, on) => {
@@ -81,21 +83,21 @@ test('↑ up shows the parent, pinned, with the cwd folder open and marked', asy
 })
 
 test('↑ up climbs to the drive root, where there is no folder above', async ($, on) => {
-  const { drawn, key } = await mount($, on)
+  const { drawn, key, up } = await mount($, on)
 
-  await key('backspace')
-  await key('backspace')
+  await up()
+  await up()
   const tree = await drawn()
   expect(tree).toContain('"work/"')
   expect(tree).not.toContain('↑ up')
-  await key('backspace')
+  await up()
   expect(await drawn()).toContain('"work/"')
 })
 
 test('↻ sync brings the tree back to the cwd, the open folders below it kept', async ($, on) => {
-  const { ui, drawn, key, click } = await mount($, on)
+  const { ui, drawn, key, click, up } = await mount($, on)
 
-  await key('backspace')
+  await up()
   // Rows from C:/work: demo/ (open, as the cwd), src/, README.md, other/, top.txt.
   await click(1)
   expect(await drawn()).toContain('main.ts')
@@ -110,17 +112,17 @@ test('↻ sync brings the tree back to the cwd, the open folders below it kept',
 })
 
 test('`s` syncs too', async ($, on) => {
-  const { drawn, key } = await mount($, on)
+  const { drawn, key, up } = await mount($, on)
 
-  await key('backspace')
+  await up()
   await key('s')
   expect(await drawn()).not.toContain('pinned')
 })
 
 test('while pinned, Insert path is relative below the cwd and absolute outside it', async ($, on) => {
-  const { filled, key, click } = await mount($, on)
+  const { filled, key, click, up } = await mount($, on)
 
-  await key('backspace')
+  await up()
   // Rows: demo/, src/, README.md, other/, top.txt.
   await click(2, 'right')
   await key('1')
@@ -130,10 +132,48 @@ test('while pinned, Insert path is relative below the cwd and absolute outside i
 })
 
 test('while pinned, a double click opens the file from the shown folder', async ($, on) => {
-  const { opened, key, click } = await mount($, on)
+  const { opened, key, click, up } = await mount($, on)
 
-  await key('backspace')
+  await up()
   await click(4)
   await click(4)
   expect(opened()).toEqual([['code', 'C:/work/top.txt']])
+})
+
+test('Backspace does not move the tree up', async ($, on) => {
+  const { drawn, key } = await mount($, on)
+
+  await key('backspace')
+  expect(await drawn()).not.toContain('pinned')
+})
+
+test('`u` moves up once per press: a held key repeating does not climb on', async ($, on) => {
+  const { drawn, key } = await mount($, on)
+
+  // A held key: repeats much closer together than a person presses.
+  await key('u')
+  await key('u')
+  await key('u')
+  await key('u')
+  const tree = await drawn()
+  expect(tree).toContain('"work/"')
+  expect(tree).toContain('↑ up')
+  expect(tree).toContain('← cwd')
+})
+
+test('/files sync puts the tree back on the cwd, from wherever it was', async ($, on) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  const { drawn, up } = await mount($, on)
+
+  await up()
+  await up()
+  expect(await drawn()).toContain('pinned')
+  const { text } = await $.command.run({
+    command: 'files',
+    args: 'sync',
+    origin: { kind: 'composer' },
+    presentation: { isFullscreen: true, columns: 160 },
+  })
+  expect(text).toContain('in sync')
+  expect(await drawn()).not.toContain('pinned')
 })
