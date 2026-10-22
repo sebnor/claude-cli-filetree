@@ -13,9 +13,22 @@ import type { TreeMark } from './marks'
  * folder, and its git mark when it has one.
  */
 export type TreeRow = [path: string, prefix: string, kind: 'f' | 'd' | 'o', mark?: TreeMark]
-/** `root` the cwd's name, `summary` the git line beside it (`3 changed`), `rows` the body rows, `icons` whether to draw Nerd Font icons. */
-export type TreeProps = { root: string; summary: string; rows: TreeRow[]; icons: boolean }
-export type TreeAction = 'toggle' | 'insert' | 'edit' | 'open' | 'refresh' | 'collapse' | 'new-md' | 'open-vscode'
+/**
+ * `root` the top folder's name, `summary` the git line beside it (`3 changed`), `rows` the body
+ * rows, `icons` whether to draw Nerd Font icons. `isPinned` while the person moved up out of sync
+ * with the session's cwd, `canGoUp` while there is a folder above, `here` the cwd's row then.
+ */
+export type TreeProps = {
+  root: string
+  summary: string
+  rows: TreeRow[]
+  icons: boolean
+  isPinned: boolean
+  canGoUp: boolean
+  here?: string
+}
+export type TreeAction =
+  | 'toggle' | 'insert' | 'edit' | 'open' | 'refresh' | 'collapse' | 'new-md' | 'open-vscode' | 'up' | 'sync'
 export type TreeMessage = { action: TreeAction; path: string }
 
 /**
@@ -43,10 +56,24 @@ const DOUBLE_CLICK_MS = 400
 const DRAG_CELLS = 2
 // The title and the header actions sit above the first row.
 const HEADER_ROWS = 2
-const HEADER_ACTIONS: readonly { label: string; action: TreeAction; from: number }[] = [
-  { label: 'refresh', action: 'refresh', from: 0 },
-  { label: 'collapse all', action: 'collapse', from: 9 },
-]
+const HEADER_GAP = 2
+
+// The header's actions as drawn, each with the column it starts at: ↑ up while there is a folder
+// above, ↻ sync while pinned (out of sync with the session's cwd).
+function headerActions(canGoUp: boolean, isPinned: boolean) {
+  const actions: { label: string; action: TreeAction }[] = [
+    ...(canGoUp ? [{ label: '↑ up', action: 'up' as const }] : []),
+    { label: 'refresh', action: 'refresh' },
+    { label: 'collapse all', action: 'collapse' },
+    ...(isPinned ? [{ label: '↻ sync', action: 'sync' as const }] : []),
+  ]
+  let from = 0
+  return actions.map(one => {
+    const placed = { ...one, from }
+    from += one.label.length + HEADER_GAP
+    return placed
+  })
+}
 
 type MenuItem = { label: string; action: TreeAction }
 
@@ -83,7 +110,8 @@ const placeMenu = (menu: Menu, items: readonly MenuItem[], columns: number, heig
 // though they never cross as `undefined` (register.tsx leaves an absent field out).
 const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
   const { Box, Text } = surface.elements
-  const { root, summary, rows, icons } = props as unknown as TreeProps
+  const { root, summary, rows, icons, isPinned, canGoUp, here } = props as unknown as TreeProps
+  const header = headerActions(canGoUp, isPinned)
   // The region fills the pane body (register.tsx sizes it), so a click on the empty room below
   // the rows reaches it too; at least as tall as the rows and a menu under the last one.
   const height = Math.max(surface.rows, rows.length + HEADER_ROWS, MENU_HEIGHT_MAX + HEADER_ROWS + 1)
@@ -159,12 +187,12 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       const index = menuItemAt(menu, event)
       if (index !== undefined) return event.button === 'left' ? choose(menu, index) : undefined
     }
-    const header = event.y === 1 && event.button === 'left'
-      ? HEADER_ACTIONS.find(one => event.x >= one.from && event.x < one.from + one.label.length)
+    const clicked = event.y === 1 && event.button === 'left'
+      ? header.find(one => event.x >= one.from && event.x < one.from + one.label.length)
       : undefined
-    if (header) {
+    if (clicked) {
       clear()
-      return act('', header.action)
+      return act('', clicked.action)
     }
     const index = event.y - HEADER_ROWS
     const row = rows[index]
@@ -202,6 +230,9 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       else if (event.key === 'q' || event.key === 'left' || event.key === 'backspace') set({ ...state, menu: undefined })
       return
     }
+    // Backspace moves the tree's top up a folder (pinning it); `s` brings it back in sync.
+    if (event.key === 'backspace' && canGoUp) return act('', 'up')
+    if (event.key === 's' && isPinned) return act('', 'sync')
     const row = rows[cursor]
     if (event.key === 'up') set({ cursor: Math.max(0, cursor - 1), hasSelection: true })
     else if (event.key === 'down') set({ cursor: Math.min(rows.length - 1, cursor + 1), hasSelection: true })
@@ -223,6 +254,7 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       <Text wrap="truncate" bold>
         {`${root}/`}
         {summary && <Text dimColor bold={false}> {summary}</Text>}
+        {isPinned && <Text color="warning" bold={false}> · pinned</Text>}
       </Text>
       {dragged ? (
         <Text wrap="truncate" color="suggestion">
@@ -230,7 +262,14 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
           <Text bold>@{dragged[0]}</Text>
         </Text>
       ) : (
-        <Text dimColor>{HEADER_ACTIONS.map(one => one.label).join('  ')}</Text>
+        <Text>
+          {header.map((one, index) => (
+            <Text dimColor={one.action !== 'sync'} color={one.action === 'sync' ? 'warning' : undefined}>
+              {index > 0 ? ' '.repeat(HEADER_GAP) : ''}
+              {one.label}
+            </Text>
+          ))}
+        </Text>
       )}
       {rows.length === 0 && <Text dimColor>(empty)</Text>}
       {rows.map(([path, prefix, kind, mark], index) => {
@@ -239,8 +278,10 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
         const isMarked = menu ? menu.row === index : state.hasSelection && cursor === index
         const badge = badgeOf(mark, kind !== 'f', columns)
         const icon = icons ? iconOf(baseName(path), kind) : undefined
+        // While pinned, the session's cwd is marked, so the place the person came from stays found.
+        const hereMark = here === path ? ' ← cwd' : ''
         // A dim dotted leader across the gap ties a name to its badge at the right edge.
-        const used = prefix.length + marker.length + (icon ? ICON_CELLS : 0) + name.length
+        const used = prefix.length + marker.length + (icon ? ICON_CELLS : 0) + name.length + hereMark.length
         const gap = badge ? columns - badge.width - used - 1 : 0
         const leader = gap >= 2 ? ` ${'·'.repeat(gap - 1)}` : ''
         return (
@@ -257,6 +298,7 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
                 <Text bold={kind !== 'f'} color={badge?.color} dimColor={mark?.i === 1} strikethrough={mark?.x === 1}>
                   {name}
                 </Text>
+                {hereMark && <Text color="warning">{hereMark}</Text>}
                 {leader && <Text dimColor>{leader}</Text>}
               </Text>
             </Box>

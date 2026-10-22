@@ -6,11 +6,13 @@ import { NO_GIT, deletedEntries, folderMarks, isIgnored, mergeGit, readGit } fro
 import { ICON_CELLS, iconOf } from './icons'
 import { badgeOf } from './marks'
 import type { TreeMark } from './marks'
+import { join, nameOf, normalize, parentOf, relativeTo } from './paths'
 import type { TreeMessage, TreeProps } from './tree-view'
 
 const PANE = 'file-tree'
 const TITLE = 'Files'
 const expanded = atom({ plugin: 'file-tree', key: 'expanded' } as const, [])
+const pinned = atom({ plugin: 'file-tree', key: 'pinned' } as const, '')
 const tick = atom({ plugin: 'file-tree', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'file-tree', key: 'git' } as const, NO_GIT)
 
@@ -58,7 +60,7 @@ const byKindThenName = (a: Listed, b: Listed) => {
 
 // The folder's entries, plus what git says was deleted from it: gone from disk, still a change.
 async function listDir($: EngineInterface, context: Context, dir: string): Promise<Listed[]> {
-  const path = dir === '' ? context.root : `${context.root}/${dir}`
+  const path = join(context.root, dir)
   const entries = await $.fs.list(path).catch(() => [] as FsEntry[])
   const listed = entries.filter(entry => !ALWAYS_HIDDEN.has(entry.name)).map(entry => ({ entry, isGone: false }))
   const present = new Set(entries.map(entry => entry.name))
@@ -81,7 +83,7 @@ function markOf(context: Context, path: string, isDir: boolean, isGone: boolean)
 }
 
 // Depth-first over the open directories only; a symbolic link is listed but never followed.
-// Paths in the rows stay relative to the cwd.
+// Paths in the rows stay relative to the tree's top folder.
 export async function walk($: EngineInterface, context: Context, dir = '', prefix = '', rows: Row[] = []) {
   const listed = await listDir($, context, dir)
   for (const [index, { entry, isGone }] of listed.entries()) {
@@ -103,40 +105,79 @@ const signature = (rows: Row[]) => rows.map(row => (row.isDir ? 'd:' : 'f:') + r
 const fit = (text: string, room: number) =>
   room <= 1 ? '…' : text.length > room ? text.slice(0, room - 1) + '…' : text
 
-const baseName = (path: string) => path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
 
 const toggle = ($: EngineInterface, path: string) =>
   update($, expanded, list => (list.includes(path) ? list.filter(one => one !== path) : [...list, path]))
 
 const refresh = ($: EngineInterface) => update($, tick, n => n + 1)
 
+/** The session's working directory, spelled as the tree spells paths. */
+const cwdOf = async ($: EngineInterface) => normalize(await $.session.cwd())
+
+/** The tree's top folder: where the person pinned it by moving up, else the session's cwd. */
+const rootOf = async ($: EngineInterface) => (await read($, pinned)) || cwdOf($)
+
+/** Every row path below `from`'s open folders, respelled from `to` (dropped where outside `to`). */
+function rebase(list: readonly string[], from: string, to: string): string[] {
+  return list.flatMap(path => {
+    const rel = relativeTo(to, join(from, path))
+    return rel === undefined || rel === '' ? [] : [rel]
+  })
+}
+
+// Moves the tree's top up one folder and pins it there: it no longer follows the session's cwd.
+// The folder it came from stays open, so the place the person was is still in view.
+async function moveUp($: EngineInterface) {
+  const root = await rootOf($)
+  const parent = parentOf(root)
+  if (parent === undefined) return
+  const came = relativeTo(parent, root)
+  await update($, expanded, list => [...new Set([...(came ? [came] : []), ...rebase(list, root, parent)])])
+  await update($, pinned, () => parent)
+  await refreshAll($)
+}
+
+// Back in sync with the session's cwd: the open folders below it stay open.
+async function sync($: EngineInterface) {
+  const root = await rootOf($)
+  const cwd = await cwdOf($)
+  await update($, expanded, list => rebase(list, root, cwd))
+  await update($, pinned, () => '')
+  await refreshAll($)
+}
+
 // Bounds the folders checked for a `.git` of their own on one read.
 const MAX_REPO_PROBES = 200
 
-// The cwd's repository; where the cwd is in none (a folder of projects), every folder on screen
+// The tree's repository; where its top is in none (a folder of projects), every folder on screen
 // that is a repository's top, each read by its own git. Written only when it changed, so a quiet
 // repository redraws nothing.
 async function refreshGit($: EngineInterface) {
-  const cwd = await $.session.cwd()
-  let next = await readGit($, cwd)
+  const root = await rootOf($)
+  let next = await readGit($, root)
   if (!next.isRepo) {
-    const rows = await walk($, contextOf(cwd, new Set(await read($, expanded)), NO_GIT))
+    const rows = await walk($, contextOf(root, new Set(await read($, expanded)), NO_GIT))
     const dirs = rows.filter(row => row.isDir).slice(0, MAX_REPO_PROBES)
-    const isTop = await Promise.all(dirs.map(row => $.fs.exists(`${cwd}/${row.path}/.git`).catch(() => false)))
+    const isTop = await Promise.all(dirs.map(row => $.fs.exists(`${join(root, row.path)}/.git`).catch(() => false)))
     const repos = dirs.filter((_, index) => isTop[index]).map(row => row.path)
-    next = mergeGit(await Promise.all(repos.map(async repo => [repo, await readGit($, `${cwd}/${repo}`)] as const)))
+    next = mergeGit(await Promise.all(repos.map(async repo => [repo, await readGit($, join(root, repo))] as const)))
   }
   const known = await read($, git)
   if (JSON.stringify(next) !== JSON.stringify(known)) await update($, git, () => next)
 }
 
-const insertPath = ($: EngineInterface, path: string) => $.prompt.fill({ text: `@${path} `, mode: 'insert' })
+// `@path` as Claude reads it: relative to the session's cwd where the file is below it, else absolute.
+async function insertPath($: EngineInterface, path: string) {
+  const file = join(await rootOf($), path)
+  const reference = relativeTo(await cwdOf($), file) || file
+  return $.prompt.fill({ text: `@${reference} `, mode: 'insert' })
+}
 
 // $VISUAL, then $EDITOR, else VS Code; through cmd on Windows so a `.cmd` shim like code.cmd resolves.
 async function openInEditor($: EngineInterface, path: string) {
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
   const editor = ((await $.env.get('VISUAL')) || (await $.env.get('EDITOR')) || 'code').trim().split(/\s+/)
-  const file = `${await $.session.cwd()}/${path}`
+  const file = join(await rootOf($), path)
   const argv = isWindows ? ['cmd', '/c', ...editor, file.replace(/\//g, '\\')] : [...editor, file]
   $.ui.toast(`Opening ${path} in ${editor[0]}`)
   const ran = await $.process.run(argv, { timeoutMs: 15000 }).catch((error: unknown) => ({
@@ -149,14 +190,13 @@ async function openInEditor($: EngineInterface, path: string) {
   }
 }
 
-// VS Code itself (not $EDITOR) on `dir` (relative to the cwd; `''` the cwd itself, from the room below
+// VS Code itself (not $EDITOR) on `dir` (a tree path; `''` the tree's top folder, from the room below
 // the rows); through cmd on Windows for code.cmd.
 async function openFolderInVsCode($: EngineInterface, dir: string) {
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
-  const cwd = await $.session.cwd()
-  const folder = dir === '' ? cwd : `${cwd}/${dir}`
+  const folder = join(await rootOf($), dir)
   const argv = isWindows ? ['cmd', '/c', 'code', folder.replace(/\//g, '\\')] : ['code', folder]
-  $.ui.toast(`Opening ${baseName(folder)} in VS Code`)
+  $.ui.toast(`Opening ${nameOf(folder)} in VS Code`)
   const ran = await $.process.run(argv, { timeoutMs: 15000 }).catch((error: unknown) => ({
     exitCode: -1,
     stderr: String(error),
@@ -172,7 +212,7 @@ const IMAGE = /\.(png|jpe?g|gif|bmp|webp|svg|ico|tiff?|heic|avif)$/i
 // The system's own handler for the file: on Windows `start`, which hands an image to Photos
 // (or whatever app the person made the default); `open` on macOS, `xdg-open` elsewhere.
 async function openWithSystem($: EngineInterface, path: string) {
-  const file = `${await $.session.cwd()}/${path}`
+  const file = join(await rootOf($), path)
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
   const isMac = !isWindows && (await $.process.run(['uname']).catch(() => undefined))?.stdout.trim() === 'Darwin'
   const argv = isWindows
@@ -190,17 +230,17 @@ async function openWithSystem($: EngineInterface, path: string) {
 }
 
 /**
- * Creates an empty `file.md` in `dir` (relative to the cwd; `''` the cwd itself), or `file-1.md`,
+ * Creates an empty `file.md` in `dir` (a tree path; `''` the tree's top folder), or `file-1.md`,
  * `file-2.md`, ... where that is taken; opens the folders down to it so it shows, then opens it
  * in the editor. Resolves with the new file's path.
  */
 async function newMarkdown($: EngineInterface, dir: string) {
-  const cwd = await $.session.cwd()
+  const root = await rootOf($)
   const inDir = (name: string) => (dir === '' ? name : `${dir}/${name}`)
   let name = 'file.md'
-  for (let n = 1; await $.fs.exists(`${cwd}/${inDir(name)}`); n++) name = `file-${n}.md`
+  for (let n = 1; await $.fs.exists(join(root, inDir(name))); n++) name = `file-${n}.md`
   const path = inDir(name)
-  await $.fs.write(`${cwd}/${path}`, '')
+  await $.fs.write(join(root, path), '')
 
   const parts = dir === '' ? [] : dir.split('/')
   const folders = parts.map((_, index) => parts.slice(0, index + 1).join('/'))
@@ -224,8 +264,19 @@ const summaryOf = (status: GitStatus) => {
   return !status.isRepo ? '' : changes === 0 ? 'clean' : `${changes} changed`
 }
 
-const treeProps = (root: string, status: GitStatus, rows: Row[], icons: boolean): TreeProps => ({
-  root,
+/** How the header reads the tree's top: pinned (moved up, out of sync) or in sync with the cwd. */
+type Where = { isPinned: boolean; canGoUp: boolean; here?: string }
+
+/** Where the tree stands: pinned or not, whether there is a folder above, the cwd's row when pinned. */
+async function whereOf($: EngineInterface, root: string): Promise<Where> {
+  const isPinned = (await read($, pinned)) !== ''
+  const here = isPinned ? relativeTo(root, await cwdOf($)) : undefined
+  return { isPinned, canGoUp: parentOf(root) !== undefined, ...(here ? { here } : {}) }
+}
+
+const treeProps = (root: string, where: Where, status: GitStatus, rows: Row[], icons: boolean): TreeProps => ({
+  root: nameOf(root),
+  ...where,
   summary: summaryOf(status),
   icons,
   rows: rows.map(row => {
@@ -254,8 +305,10 @@ export const register: Register = (on, options) => {
       isPolling = true
       void (async () => {
         await refreshGit($)
-        const context = contextOf(await $.session.cwd(), new Set(await read($, expanded)), await read($, git))
-        const current = signature(await walk($, context))
+        const root = await rootOf($)
+        const context = contextOf(root, new Set(await read($, expanded)), await read($, git))
+        // The top folder is in the signature: a `cd` while in sync redraws the new tree.
+        const current = `${root}\n${signature(await walk($, context))}`
         if (lastSignature !== undefined && current !== lastSignature) await refresh($)
         lastSignature = current
       })().finally(() => (isPolling = false))
@@ -297,6 +350,8 @@ export const register: Register = (on, options) => {
     else if (action === 'collapse') await collapseAll($)
     else if (action === 'new-md') await newMarkdown($, path)
     else if (action === 'open-vscode') void openFolderInVsCode($, path)
+    else if (action === 'up') await moveUp($)
+    else if (action === 'sync') await sync($)
 
     return {}
   })
@@ -304,10 +359,11 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     await read($, tick)
-    const cwd = await $.session.cwd()
-    const context = contextOf(cwd, new Set(await read($, expanded)), await read($, git))
+    const top = await rootOf($)
+    const where = await whereOf($, top)
+    const context = contextOf(top, new Set(await read($, expanded)), await read($, git))
     const rows = await walk($, context)
-    const root = baseName(cwd)
+    const root = nameOf(top)
     const width = Math.max(12, e.props.bodyColumns)
     // The tree view needs the raw pointer for its right-click menu: a desktop, or the fullscreen
     // terminal that reports clicks. Elsewhere the rows are plain Buttons (left click only).
@@ -324,7 +380,7 @@ export const register: Register = (on, options) => {
       const height = Math.max(rows.length + 2, e.props.scroll.bodyRows - (more ? 1 : 0))
       return (
         <Box flexDirection="column">
-          <Client key="tree" module="./tree-view.tsx" props={treeProps(root, context.status, rows, icons)} width={width} height={height} />
+          <Client key="tree" module="./tree-view.tsx" props={treeProps(top, where, context.status, rows, icons)} width={width} height={height} />
           {more}
         </Box>
       )
@@ -333,10 +389,17 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         <Text bold>
-          {fit(`${root}/`, width - (summary ? summary.length + 1 : 0))}
+          {fit(`${root}/`, width - (summary ? summary.length + 1 : 0) - (where.isPinned ? 9 : 0))}
           {summary && <Text dimColor> {summary}</Text>}
+          {where.isPinned && <Text color="warning"> · pinned</Text>}
         </Text>
         <Box flexDirection="row">
+          {where.canGoUp && (
+            <Button key="up" plain dimColor onPress={() => void moveUp($)}>
+              ↑ up
+            </Button>
+          )}
+          {where.canGoUp && <Text> </Text>}
           <Button key="refresh" plain dimColor onPress={() => void refreshAll($)}>
             refresh
           </Button>
@@ -344,6 +407,12 @@ export const register: Register = (on, options) => {
           <Button key="collapse" plain dimColor onPress={() => void collapseAll($)}>
             collapse all
           </Button>
+          {where.isPinned && <Text> </Text>}
+          {where.isPinned && (
+            <Button key="sync" plain onPress={() => void sync($)}>
+              ↻ sync
+            </Button>
+          )}
         </Box>
         {rows.length === 0 && <Text dimColor>(empty)</Text>}
         {rows.map(row => {

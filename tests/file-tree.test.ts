@@ -13,6 +13,8 @@ const DISK: Record<string, FsEntry[]> = {
 }
 
 const CWD = 'C:/work/demo'
+// The header reads `↑ up  refresh  collapse all`: refresh starts at column 6.
+const REFRESH_X = 7
 
 const fakeDisk = (on: On) => {
   on('session.cwd', () => ({ value: CWD }))
@@ -39,7 +41,7 @@ for (const surface of ['terminal', 'vscode'] as const) {
     const ui = await $.ui.mount({ plugin: 'file-tree', surface, component: 'Pane', props: PROPS, requestId: 'file-tree' })
 
     const rows = (await ui.findAll({ type: 'Button' })).map(one => one.key)
-    expect(rows).toEqual(['refresh', 'collapse', 'd:src', 'f:.env', 'f:logo.png', 'f:README.md'])
+    expect(rows).toEqual(['up', 'refresh', 'collapse', 'd:src', 'f:.env', 'f:logo.png', 'f:README.md'])
   })
 
   test(`${surface}: pressing a folder opens it, pressing again closes it`, async ($, on) => {
@@ -245,7 +247,7 @@ test('desktop: git marks files and folders with their status and line counts', a
     plugin: 'file-tree', surface: 'desktop', component: 'Pane', props: PROPS, requestId: 'file-tree',
     viewport: { columns: 120, rows: 40 },
   })
-  await ui.pointer({ type: 'down', x: 1, y: 1, button: 'left', in: 'tree' })
+  await ui.pointer({ type: 'down', x: REFRESH_X, y: 1, button: 'left', in: 'tree' })
   await ui.pointer({ type: 'down', x: 4, y: 4, button: 'left', in: 'tree' })
 
   const drawn = await ui.drawn({ in: 'tree' })
@@ -301,7 +303,7 @@ test('desktop: a repository nested in a plain folder shows its changes', async (
     plugin: 'file-tree', surface: 'desktop', component: 'Pane', props: PROPS, requestId: 'file-tree',
     viewport: { columns: 120, rows: 40 },
   })
-  await ui.pointer({ type: 'down', x: 1, y: 1, button: 'left', in: 'tree' })
+  await ui.pointer({ type: 'down', x: REFRESH_X, y: 1, button: 'left', in: 'tree' })
 
   const drawn = JSON.stringify(await ui.drawn({ in: 'tree' }))
   expect(drawn).toContain('"+2"')
@@ -319,7 +321,7 @@ test('desktop: a dotted leader ties a changed row to its badge; an unchanged row
     plugin: 'file-tree', surface: 'desktop', component: 'Pane', props: PROPS, requestId: 'file-tree',
     viewport: { columns: 120, rows: 40 },
   })
-  await ui.pointer({ type: 'down', x: 1, y: 1, button: 'left', in: 'tree' })
+  await ui.pointer({ type: 'down', x: REFRESH_X, y: 1, button: 'left', in: 'tree' })
 
   const rows = ((await ui.drawn({ in: 'tree' })) as { children?: unknown[] }).children ?? []
   const rowOf = (name: string) => JSON.stringify(rows.find(row => JSON.stringify(row).includes(`"${name}"`)))

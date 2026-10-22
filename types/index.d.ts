@@ -1,4 +1,4 @@
-/** Directory paths relative to the cwd, `/`-separated. */
+/** Directory paths relative to the tree's top folder, `/`-separated. */
 export type DirPath = string
 
 /** A file's change against HEAD: Modified, Added, Deleted, Renamed, Untracked, Conflicted. */
@@ -19,8 +19,13 @@ export type GitStatus = {
 declare module 'claude-code' {
   interface PluginState {
     'file-tree': {
-      /** Directories shown open. */
+      /** Directories shown open, relative to the tree's top folder. */
       expanded: DirPath[]
+      /**
+       * The tree's top folder while pinned (absolute, `/`-separated), after the person moved up;
+       * `''` while the tree is in sync with the session's working directory.
+       */
+      pinned: string
       /** Bumped whenever the tree on disk may have changed; drawings read it. */
       tick: number
       /** Last `git status` read; written only when it changed. */

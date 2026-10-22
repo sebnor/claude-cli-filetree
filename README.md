@@ -17,8 +17,9 @@ refresh  collapse all
 
 ## Features
 
-- **The whole tree.** Every file and folder in the session's working directory, folders first, A–Z. Only version-control internals (`.git`, `.hg`, `.svn`) are hidden. The tree follows the session if it changes directory.
+- **The whole tree.** Every file and folder in the session's working directory, folders first, A–Z. Only version-control internals (`.git`, `.hg`, `.svn`) are hidden. The tree stays in sync with the session if it changes directory – until you move up out of it.
 - **Git status per row.** A status letter – `M` modified, `A` added, `U` untracked, `R` renamed, `D` deleted, `C` conflict – and `+added -removed` line counts against `HEAD`. Folders sum up everything beneath them and show a `●` in the colour of the most serious change, so a closed folder still tells you something changed inside. A dotted leader ties each name to its badge. Deleted files stay in the tree, struck through. Ignored paths are dimmed.
+- **Move up and back.** **↑ up** shows the folder above and pins the tree there, out of sync with the session, with the session's folder marked `← cwd`; **↻ sync** brings it back.
 - **Nested repositories.** When the working directory is a folder of projects rather than a repository itself, every repository among the visible folders reports its own changes.
 - **File icons.** Coloured [Nerd Font](https://www.nerdfonts.com/) icons by file type and name (can be turned off).
 - **Mouse.** Click to select, double-click to open, right-click for actions, and drag a file out of the pane to reference it in your prompt.
@@ -58,13 +59,15 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | Left click on a file | Select it |
 | Double click on a file | Open it: images in the system's default viewer, everything else in your editor |
 | Drag a file left out of the pane and release | Reference it in your prompt (`@path`, at the prompt's cursor); release inside the pane to cancel |
-| Right click on a file | **Insert path** (adds `@path` to your prompt), **Edit file** |
+| Right click on a file | **Insert path** (adds `@path` to your prompt – relative below the session's folder, absolute outside it), **Edit file** |
 | Right click on a folder | **New .md file** (creates `file.md` inside it, then opens it), **Open VS Code** (on that folder) |
-| Right click below the last row | The same, for the working directory itself |
+| Right click below the last row | The same, for the top folder of the tree |
 | Click anywhere else in the pane | Clear the selection, close the menu |
+| **↑ up** | Show the folder above as the top and pin the tree there (title: `· pinned`); the folder you came from stays open, marked `← cwd` |
+| **↻ sync** (while pinned) | Back in sync with the session's working directory; folders open below it stay open |
 | **refresh**, **collapse all** | Re-read the tree and git status; close every folder |
 
-With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
+With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu, Backspace moves up, `s` syncs. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
 
 **Editor:** files open in `$VISUAL`, else `$EDITOR`, else VS Code. Use a graphical editor – a terminal editor such as `vim` cannot share Claude Code's terminal. **Open VS Code** always uses VS Code.
 
@@ -100,6 +103,7 @@ npx -p typescript@5 tsc -p .     # type-check (after one load has written .claud
 | --- | --- |
 | `hooks/register.tsx` | The hooks module: the pane, the `/files` command, refreshes, opening files |
 | `hooks/tree-view.tsx` | The surface module drawing the tree and reading the mouse and keys |
+| `hooks/paths.ts` | Path helpers: the tree's top folder may be above the session's cwd |
 | `hooks/git.ts` | Reads `git status` and `git diff --numstat` |
 | `hooks/marks.ts`, `hooks/icons.ts` | Git badges and file icons |
 | `types/index.d.ts` | The plugin's state contract |
