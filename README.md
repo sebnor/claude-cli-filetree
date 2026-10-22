@@ -21,7 +21,7 @@ refresh  collapse all
 - **Git status per row.** A status letter – `M` modified, `A` added, `U` untracked, `R` renamed, `D` deleted, `C` conflict – and `+added -removed` line counts against `HEAD`. Folders sum up everything beneath them and show a `●` in the colour of the most serious change, so a closed folder still tells you something changed inside. A dotted leader ties each name to its badge. Deleted files stay in the tree, struck through. Ignored paths are dimmed.
 - **Nested repositories.** When the working directory is a folder of projects rather than a repository itself, every repository among the visible folders reports its own changes.
 - **File icons.** Coloured [Nerd Font](https://www.nerdfonts.com/) icons by file type and name (can be turned off).
-- **Mouse.** Click to select, double-click to open, right-click for actions.
+- **Mouse.** Click to select, double-click to open, right-click for actions, and drag a file out of the pane to reference it in your prompt.
 - **Stays current.** Refreshes after Claude edits files or runs commands, and checks every 4 seconds for changes made elsewhere (your editor, a build, a commit) – redrawing only when something actually changed.
 
 ## Requirements
@@ -57,6 +57,7 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | Left click on a folder | Open or close it |
 | Left click on a file | Select it |
 | Double click on a file | Open it: images in the system's default viewer, everything else in your editor |
+| Drag a file left out of the pane and release | Reference it in your prompt (`@path`, at the prompt's cursor); release inside the pane to cancel |
 | Right click on a file | **Insert path** (adds `@path` to your prompt), **Edit file** |
 | Right click on a folder | **New .md file** (creates `file.md` inside it, then opens it), **Open VS Code** (on that folder) |
 | Right click below the last row | The same, for the working directory itself |

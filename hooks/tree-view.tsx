@@ -23,11 +23,24 @@ export type TreeMessage = { action: TreeAction; path: string }
  * the menu opens at `y` (region cells) instead of under a row.
  */
 type Menu = { row: number; x: number; y: number; selected: number }
-/** `cursor` is the selected row (drawn while `hasSelection`); `lastClick` arms a double click. */
-type State = { cursor: number; hasSelection: boolean; menu?: Menu; lastClick?: { row: number; at: number } }
+/**
+ * `cursor` is the selected row (drawn while `hasSelection`); `lastClick` arms a double click.
+ * `pressed` is a file row the left button went down on (region cells), `drag` that row once the
+ * pointer has moved far enough to be dragging it, and whether it is outside the pane now.
+ */
+type State = {
+  cursor: number
+  hasSelection: boolean
+  menu?: Menu
+  lastClick?: { row: number; at: number }
+  pressed?: { row: number; x: number; y: number }
+  drag?: { row: number; isOutside: boolean }
+}
 
 // Two left clicks on one file this close together open it.
 const DOUBLE_CLICK_MS = 400
+// A held press becomes a drag once the pointer is this many cells away, so a click never does.
+const DRAG_CELLS = 2
 // The title and the header actions sit above the first row.
 const HEADER_ROWS = 2
 const HEADER_ACTIONS: readonly { label: string; action: TreeAction; from: number }[] = [
@@ -114,6 +127,29 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
       if (menu && index !== undefined && index !== menu.selected) set({ ...state, menu: { ...menu, selected: index } })
       return
     }
+    // Dragging a file: the region holds the pointer from the press to the release, so moves
+    // arrive past its edges too (x below 0 is left of the pane: the conversation, the prompt).
+    if (event.type === 'move') {
+      const pressed = state.pressed
+      if (!pressed) return
+      const isOutside = event.x < 0
+      if (!state.drag) {
+        const distance = Math.max(Math.abs(event.x - pressed.x), Math.abs(event.y - pressed.y))
+        if (distance >= DRAG_CELLS) set({ ...state, drag: { row: pressed.row, isOutside } })
+      } else if (state.drag.isOutside !== isOutside) {
+        set({ ...state, drag: { ...state.drag, isOutside } })
+      }
+      return
+    }
+    // Dropped left of the pane: the file is referenced in the prompt. Anywhere else: cancelled.
+    if (event.type === 'up') {
+      const drag = state.drag
+      if (!state.pressed && !drag) return
+      set({ ...state, pressed: undefined, drag: undefined, lastClick: drag ? undefined : state.lastClick })
+      const row = drag && event.x < 0 ? rows[drag.row] : undefined
+      if (row) act(row[0], 'insert')
+      return
+    }
     if (event.type !== 'down') return
     if (menu) {
       const index = menuItemAt(menu, event)
@@ -142,7 +178,12 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
     const now = Date.now()
     const last = state.lastClick
     const isDouble = last !== undefined && last.row === index && now - last.at <= DOUBLE_CLICK_MS
-    set({ cursor: index, hasSelection: true, lastClick: isDouble ? undefined : { row: index, at: now } })
+    set({
+      cursor: index,
+      hasSelection: true,
+      lastClick: isDouble ? undefined : { row: index, at: now },
+      pressed: { row: index, x: event.x, y: event.y },
+    })
     if (isDouble) press(index)
   })
 
@@ -170,6 +211,8 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
   const menu = state.menu
   const menuItems = menu ? itemsFor(menu, rows) : []
   const place = menu && placeMenu(menu, menuItems, columns, height)
+  // While a file is dragged, the header's action row says what a release does.
+  const dragged = state.drag ? rows[state.drag.row] : undefined
 
   return (
     <Box flexDirection="column" height={height}>
@@ -177,9 +220,14 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
         {`${root}/`}
         {summary && <Text dimColor bold={false}> {summary}</Text>}
       </Text>
-      <Text dimColor>
-        {HEADER_ACTIONS.map(one => one.label).join('  ')}
-      </Text>
+      {dragged ? (
+        <Text wrap="truncate" color="suggestion">
+          {state.drag?.isOutside ? '↳ release to reference ' : '↳ drag left of the pane to reference '}
+          <Text bold>@{dragged[0]}</Text>
+        </Text>
+      ) : (
+        <Text dimColor>{HEADER_ACTIONS.map(one => one.label).join('  ')}</Text>
+      )}
       {rows.length === 0 && <Text dimColor>(empty)</Text>}
       {rows.map(([path, prefix, kind, mark], index) => {
         const name = baseName(path) + (kind === 'f' ? '' : '/')

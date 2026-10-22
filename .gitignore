@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 Thumbs.db
 *.log
+
+# Compiled output, if tsc is ever run without the generated tsconfig (it sets noEmit)
+hooks/*.js
+tests/*.js
