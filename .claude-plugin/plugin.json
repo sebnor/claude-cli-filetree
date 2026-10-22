@@ -1,0 +1,19 @@
+{
+  "name": "file-tree",
+  "version": "0.1.0",
+  "description": "A sidebar pane showing every file in the working directory as a collapsible tree, with git status, file icons and right-click actions",
+  "author": { "name": "sebnor", "url": "https://github.com/sebnor" },
+  "homepage": "https://github.com/sebnor/claude-cli-filetree",
+  "repository": "https://github.com/sebnor/claude-cli-filetree",
+  "license": "MIT",
+  "keywords": ["file-tree", "explorer", "sidebar", "pane", "git", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "icons": {
+      "type": "boolean",
+      "title": "File icons",
+      "description": "Draw a Nerd Font icon before each file and folder. Turn off if your terminal font is not a Nerd Font (the icons show as boxes).",
+      "default": true
+    }
+  }
+}

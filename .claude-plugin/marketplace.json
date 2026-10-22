@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claude-cli-filetree",
+  "owner": {
+    "name": "sebnor",
+    "url": "https://github.com/sebnor"
+  },
+  "description": "A file tree sidebar for the Claude Code CLI.",
+  "plugins": [
+    {
+      "name": "file-tree",
+      "source": "./",
+      "description": "A sidebar pane showing every file in the working directory as a collapsible tree, with git status, file icons and right-click actions.",
+      "category": "productivity",
+      "keywords": ["file-tree", "explorer", "sidebar", "pane", "git"]
+    }
+  ]
+}
