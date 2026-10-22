@@ -13,6 +13,7 @@ const PANE = 'file-tree'
 const TITLE = 'Files'
 const expanded = atom({ plugin: 'file-tree', key: 'expanded' } as const, [])
 const pinned = atom({ plugin: 'file-tree', key: 'pinned' } as const, '')
+const newFile = atom({ plugin: 'file-tree', key: 'newFile' } as const, { isOpen: false, dir: '', suggested: '', name: '', error: '' })
 const tick = atom({ plugin: 'file-tree', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'file-tree', key: 'git' } as const, NO_GIT)
 
@@ -229,26 +230,67 @@ async function openWithSystem($: EngineInterface, path: string) {
   }
 }
 
+const inDir = (dir: string, name: string) => (dir === '' ? name : `${dir}/${name}`)
+
+// Characters no file name may hold on Windows (and so nowhere, for a name meant to travel).
+const BAD_NAME = /[<>:"|?*\u0000-\u001f]/
+
 /**
- * Creates an empty `file.md` in `dir` (a tree path; `''` the tree's top folder), or `file-1.md`,
- * `file-2.md`, ... where that is taken; opens the folders down to it so it shows, then opens it
- * in the editor. Resolves with the new file's path.
+ * The name typed into the box as a path below its folder, or why it cannot be one: `.md` added
+ * where the last part has no extension; `/` (or `\`) makes subfolders; no `..`, no absolute path.
  */
-async function newMarkdown($: EngineInterface, dir: string) {
-  const root = await rootOf($)
-  const inDir = (name: string) => (dir === '' ? name : `${dir}/${name}`)
+export function nameToPath(raw: string): { name: string } | { error: string } {
+  const name = raw.trim().replace(/\\/g, '/')
+  if (name.startsWith('/')) return { error: 'Give a name inside the folder, not an absolute path.' }
+  const parts = name.split('/')
+  if (parts.some(part => part === '' || part === '.' || part === '..')) {
+    return { error: 'A name cannot have empty parts, "." or "..".' }
+  }
+  if (BAD_NAME.test(name)) return { error: 'A name cannot hold < > : " | ? * or control characters.' }
+  const last = parts[parts.length - 1] ?? ''
+  return { name: last.includes('.') && !last.endsWith('.') ? name : `${name.replace(/\.$/, '')}.md` }
+}
+
+/** The first of `file.md`, `file-1.md`, ... that is free in `dir`. */
+async function freeName($: EngineInterface, root: string, dir: string) {
   let name = 'file.md'
-  for (let n = 1; await $.fs.exists(join(root, inDir(name))); n++) name = `file-${n}.md`
-  const path = inDir(name)
+  for (let n = 1; await $.fs.exists(join(root, inDir(dir, name))); n++) name = `file-${n}.md`
+  return name
+}
+
+const NAME_KEY = 'new-name'
+
+// **New .md file**: opens the name box at the top of the pane, for a file in `dir` (a tree path;
+// `''` the tree's top folder), and puts the keyboard in its field where the pane holds the keys.
+async function openNewFile($: EngineInterface, dir: string) {
+  const suggested = await freeName($, await rootOf($), dir)
+  await update($, newFile, () => ({ isOpen: true, dir, suggested, name: '', error: '' }))
+  await $.ui.focus({ requestId: PANE, key: NAME_KEY }).catch(() => undefined)
+}
+
+const closeNewFile = ($: EngineInterface) => update($, newFile, box => ({ ...box, isOpen: false, error: '' }))
+
+/**
+ * Creates the file the box names (empty: the suggested `file.md`), opens the folders down to it
+ * so it shows, then opens it in the editor; a name refused or taken stays in the box with why.
+ */
+async function submitNewFile($: EngineInterface, raw: string) {
+  const box = await read($, newFile)
+  if (!box.isOpen) return
+  const parsed = nameToPath(raw.trim() === '' ? box.suggested : raw)
+  const refuse = (error: string) => update($, newFile, one => ({ ...one, name: raw, error }))
+  if ('error' in parsed) return refuse(parsed.error)
+  const root = await rootOf($)
+  const path = inDir(box.dir, parsed.name)
+  if (await $.fs.exists(join(root, path))) return refuse(`${parsed.name} already exists.`)
   await $.fs.write(join(root, path), '')
 
-  const parts = dir === '' ? [] : dir.split('/')
+  const parts = path.split('/').slice(0, -1)
   const folders = parts.map((_, index) => parts.slice(0, index + 1).join('/'))
   await update($, expanded, list => [...new Set([...list, ...folders])])
+  await closeNewFile($)
   await refreshAll($)
   void openInEditor($, path)
-
-  return path
 }
 
 /** What a double click (or Enter) does to a file: an image to the system viewer, the rest to the editor. */
@@ -348,7 +390,7 @@ export const register: Register = (on, options) => {
     else if (action === 'open') void openFile($, path)
     else if (action === 'refresh') await refreshAll($)
     else if (action === 'collapse') await collapseAll($)
-    else if (action === 'new-md') await newMarkdown($, path)
+    else if (action === 'new-md') await openNewFile($, path)
     else if (action === 'open-vscode') void openFolderInVsCode($, path)
     else if (action === 'up') await moveUp($)
     else if (action === 'sync') await sync($)
@@ -374,12 +416,43 @@ export const register: Register = (on, options) => {
       <Text dimColor>… more than {MAX_ROWS} entries, collapse some folders</Text>
     )
 
+    // The name box of **New .md file**, above the tree while open. A surface with no text field
+    // (mobile) has no box: there the menu that opens it is not drawn either.
+    const box = await read($, newFile)
+    const table = $.ui.resolve(e)
+    const Input = 'Input' in table ? table.Input : undefined
+    const boxRows = box.isOpen && Input ? 5 + (box.error ? 1 : 0) : 0
+    const nameBox = boxRows > 0 && Input && (
+      <Box flexDirection="column" borderStyle="round" borderColor="suggestion" paddingX={1}>
+        <Text wrap="truncate">
+          New file in <Text bold>{box.dir === '' ? `${root}/` : `${box.dir}/`}</Text>
+        </Text>
+        <Input
+          key={NAME_KEY}
+          label="Name "
+          placeholder={box.suggested}
+          value={box.name}
+          submitLabel="create"
+          autoFocus
+          onSubmit={name => void submitNewFile($, name)}
+        />
+        {box.error && <Text color="error">{box.error}</Text>}
+        <Box flexDirection="row">
+          <Button key="new-cancel" plain dimColor onPress={() => void closeNewFile($)}>
+            cancel
+          </Button>
+          <Text dimColor wrap="truncate">  Enter creates · empty: {box.suggested}</Text>
+        </Box>
+      </Box>
+    )
+
     // With a pointer the tree view draws the whole body, header included, and fills the pane,
     // so every click in the sidebar reaches it (a click on no row clears the selection).
     if (hasPointer) {
-      const height = Math.max(rows.length + 2, e.props.scroll.bodyRows - (more ? 1 : 0))
+      const height = Math.max(rows.length + 2, e.props.scroll.bodyRows - (more ? 1 : 0) - boxRows)
       return (
         <Box flexDirection="column">
+          {nameBox}
           <Client key="tree" module="./tree-view.tsx" props={treeProps(top, where, context.status, rows, icons)} width={width} height={height} />
           {more}
         </Box>
@@ -388,6 +461,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column">
+        {nameBox}
         <Text bold>
           {fit(`${root}/`, width - (summary ? summary.length + 1 : 0) - (where.isPinned ? 9 : 0))}
           {summary && <Text dimColor> {summary}</Text>}

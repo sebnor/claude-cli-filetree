@@ -60,7 +60,7 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | Double click on a file | Open it: images in the system's default viewer, everything else in your editor |
 | Drag a file left out of the pane and release | Reference it in your prompt (`@path`, at the prompt's cursor); release inside the pane to cancel |
 | Right click on a file | **Insert path** (adds `@path` to your prompt – relative below the session's folder, absolute outside it), **Edit file** |
-| Right click on a folder | **New .md file** (creates `file.md` inside it, then opens it), **Open VS Code** (on that folder) |
+| Right click on a folder | **New .md file** (asks for a name, creates the file inside it, then opens it), **Open VS Code** (on that folder) |
 | Right click below the last row | The same, for the top folder of the tree |
 | Click anywhere else in the pane | Clear the selection, close the menu |
 | **↑ up** | Show the folder above as the top and pin the tree there (title: `· pinned`); the folder you came from stays open, marked `← cwd` |
@@ -68,6 +68,8 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | **refresh**, **collapse all** | Re-read the tree and git status; close every folder |
 
 With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu, Backspace moves up, `s` syncs. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
+
+**New .md file** opens a name box at the top of the pane. A name without an extension gets `.md` (`notes` → `notes.md`), one with an extension keeps it, and `docs/today` creates the subfolder too. An empty name takes the suggested `file.md` (or `file-1.md`, ... when taken). A name that exists or holds characters a file name cannot is refused in the box. **cancel** closes it.
 
 **Editor:** files open in `$VISUAL`, else `$EDITOR`, else VS Code. Use a graphical editor – a terminal editor such as `vim` cannot share Claude Code's terminal. **Open VS Code** always uses VS Code.
 

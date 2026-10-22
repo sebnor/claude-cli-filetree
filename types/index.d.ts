@@ -16,6 +16,12 @@ export type GitStatus = {
   ignored: string[]
 }
 
+/**
+ * The name box of **New .md file**: open or not, the folder the file goes into (a tree path),
+ * the default name an empty field takes, the name last tried and why it was refused.
+ */
+export type NewFile = { isOpen: boolean; dir: string; suggested: string; name: string; error: string }
+
 declare module 'claude-code' {
   interface PluginState {
     'file-tree': {
@@ -30,6 +36,8 @@ declare module 'claude-code' {
       tick: number
       /** Last `git status` read; written only when it changed. */
       git: GitStatus
+      /** The name box a **New .md file** opens at the top of the pane. */
+      newFile: NewFile
     }
   }
 }
