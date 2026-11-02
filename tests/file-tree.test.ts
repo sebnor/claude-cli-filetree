@@ -92,6 +92,7 @@ for (const { surface, viewport } of POINTER) {
     fakeDisk(on)
     const filled: string[] = []
     const ran: string[][] = []
+    const envs: unknown[] = []
     on('prompt.fill', ($, e) => {
       filled.push(e.text)
       return { isFilled: true, text: e.text, cursor: e.text.length }
@@ -99,11 +100,12 @@ for (const { surface, viewport } of POINTER) {
     on('env.get', ($, e) => ({ value: env[e.name] }))
     on('process.run', ($, e) => {
       ran.push([...e.argv])
+      envs.push(e.init?.env)
       return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
     })
     const ui = await $.ui.mount({ plugin: 'file-tree', surface, component: 'Pane', props: PROPS, requestId: 'file-tree', viewport })
     const click = (y: number) => ui.pointer({ type: 'down', x: 4, y: y + 2, button: 'left', in: 'tree' })
-    return { ui, filled, ran, click }
+    return { ui, filled, ran, envs, click }
   }
 
   test(`${surface}: one left click selects a file and does nothing else`, async ($, on) => {
@@ -184,16 +186,17 @@ for (const { surface, viewport } of POINTER) {
   })
 
   test(`${surface}: on Windows Open with default goes through start, Open in explorer selects the file`, async ($, on) => {
-    const { ui, ran } = await mount($, on, { OS: 'Windows_NT' })
+    const { ui, ran, envs } = await mount($, on, { OS: 'Windows_NT' })
 
     await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
     await ui.key({ key: '3', in: 'tree' })
     await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
     await ui.key({ key: '5', in: 'tree' })
-    expect(ran).toEqual([
-      ['cmd', '/c', 'start', '', 'C:\\work\\demo\\README.md'],
-      ['explorer', '/select,', 'C:\\work\\demo\\README.md'],
-    ])
+    expect(ran[0]).toEqual(['cmd', '/c', 'start', '', 'C:\\work\\demo\\README.md'])
+    // The file reaches PowerShell in a variable, not on its command line.
+    expect(ran[1]?.slice(0, 4)).toEqual(['powershell', '-NoProfile', '-NonInteractive', '-Command'])
+    expect(ran[1]?.[4]).toContain('/select,')
+    expect(envs[1]).toEqual({ FILE_TREE_TARGET: 'C:\\work\\demo\\README.md' })
   })
 
   test(`${surface}: Copy path puts the file's absolute path on the clipboard`, async ($, on) => {
@@ -243,7 +246,7 @@ for (const { surface, viewport } of POINTER) {
     expect(drawn).not.toContain('Copy path')
 
     await ui.key({ key: 'return', in: 'tree' })
-    expect(ran).toEqual([['explorer', 'C:\\work\\demo\\src']])
+    expect(ran).toEqual([['cmd', '/c', 'start', '', 'explorer', 'C:\\work\\demo\\src']])
   })
 
   test(`${surface}: the pointer leaving the tree closes the menu and hands the keys back`, async ($, on) => {

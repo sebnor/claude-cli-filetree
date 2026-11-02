@@ -231,18 +231,29 @@ async function openWithSystem($: EngineInterface, path: string) {
 }
 
 // The file manager on `path`: a folder opened, a file shown selected in the folder it lives in.
-// Explorer exits 1 even when it opened, so only a failure to start it is reported.
+// Explorer exits 1 even when it opened, so only a failure to start it is reported. The engine
+// starts commands with their window hidden, and Explorer started straight from it keeps that,
+// opening an invisible window: a folder goes through `start`, a file through PowerShell's
+// Start-Process (a normal window), since `/select,` does not survive cmd's and start's parsing.
+// The path reaches PowerShell in a variable, so no space or quote in it needs escaping.
+const SELECT_IN_EXPLORER =
+  "Start-Process -FilePath explorer.exe -WindowStyle Normal -ArgumentList ('/select,\"' + $env:FILE_TREE_TARGET + '\"')"
+
 async function reveal($: EngineInterface, path: string, isDir: boolean) {
   const target = join(await rootOf($), path)
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
   const isMac = !isWindows && (await $.process.run(['uname']).catch(() => undefined))?.stdout.trim() === 'Darwin'
+  const native = isWindows ? target.replace(/\//g, '\\') : target
   const argv = isWindows
-    ? ['explorer', ...(isDir ? [] : ['/select,']), target.replace(/\//g, '\\')]
+    ? isDir
+      ? ['cmd', '/c', 'start', '', 'explorer', native]
+      : ['powershell', '-NoProfile', '-NonInteractive', '-Command', SELECT_IN_EXPLORER]
     : isMac
       ? ['open', ...(isDir ? [] : ['-R']), target]
       : ['xdg-open', isDir ? target : (parentOf(target) ?? target)]
   $.ui.toast(`Opening ${nameOf(target)} in the file manager`)
-  await $.process.run(argv, { timeoutMs: 15000 }).catch((error: unknown) => {
+  const env = { FILE_TREE_TARGET: native }
+  await $.process.run(argv, { timeoutMs: 15000, env }).catch((error: unknown) => {
     $.ui.toast(`Could not open the file manager: ${String(error).split('\n')[0]}`)
   })
 }
