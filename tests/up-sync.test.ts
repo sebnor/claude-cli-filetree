@@ -119,15 +119,17 @@ test('`s` syncs too', async ($, on) => {
   expect(await drawn()).not.toContain('pinned')
 })
 
-test('while pinned, Insert path is relative below the cwd and absolute outside it', async ($, on) => {
-  const { filled, key, click, up } = await mount($, on)
+test('while pinned, a dragged file is referenced relative below the cwd and absolute outside it', async ($, on) => {
+  const { ui, filled, up } = await mount($, on)
+  const drag = async (index: number) => {
+    await ui.pointer({ type: 'down', x: 8, y: index + 2, button: 'left', in: 'tree' })
+    await ui.pointer({ type: 'up', x: -8, y: index + 2, button: 'left', in: 'tree' })
+  }
 
   await up()
   // Rows: demo/, src/, README.md, other/, top.txt.
-  await click(2, 'right')
-  await key('1')
-  await click(4, 'right')
-  await key('1')
+  await drag(2)
+  await drag(4)
   expect(filled).toEqual(['@README.md ', '@C:/work/top.txt '])
 })
 

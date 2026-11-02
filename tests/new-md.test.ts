@@ -56,7 +56,7 @@ const mount = async ($: Parameters<TestBody>[0], on: On, taken: string[] = []) =
 test('New .md file opens a name box, nothing written yet; the typed name gets .md', async ($, on) => {
   const { written, opened, menu, name, pane } = await mount($, on)
 
-  await menu(12, '1')
+  await menu(12, '3')
   expect(await pane()).toContain('New file in ')
   expect(written).toEqual([])
 
@@ -69,7 +69,7 @@ test('New .md file opens a name box, nothing written yet; the typed name gets .m
 test('a name with an extension keeps it', async ($, on) => {
   const { written, menu, name } = await mount($, on)
 
-  await menu(12, '1')
+  await menu(12, '3')
   await name('todo.txt')
   expect(written).toEqual([`${CWD}/todo.txt`])
 })
@@ -77,7 +77,7 @@ test('a name with an extension keeps it', async ($, on) => {
 test('an empty name takes the suggested one: file.md, or the next free file-N.md', async ($, on) => {
   const { written, menu, name, pane } = await mount($, on, [`${CWD}/file.md`, `${CWD}/file-1.md`])
 
-  await menu(12, '1')
+  await menu(12, '3')
   expect(await pane()).toContain('file-2.md')
   await name('')
   expect(written).toEqual([`${CWD}/file-2.md`])
@@ -86,7 +86,7 @@ test('an empty name takes the suggested one: file.md, or the next free file-N.md
 test('a name already taken is refused in the box, which stays open with the name', async ($, on) => {
   const { written, menu, name, pane } = await mount($, on, [`${CWD}/README.md`])
 
-  await menu(12, '1')
+  await menu(12, '3')
   await name('README')
   expect(written).toEqual([])
   const drawn = await pane()
@@ -97,7 +97,7 @@ test('a name already taken is refused in the box, which stays open with the name
 test('a name with characters a file cannot hold, or with .., is refused', async ($, on) => {
   const { written, menu, name, pane } = await mount($, on)
 
-  await menu(12, '1')
+  await menu(12, '3')
   await name('a:b')
   expect(await pane()).toContain('cannot hold')
   await name('../escape')
@@ -108,7 +108,7 @@ test('a name with characters a file cannot hold, or with .., is refused', async 
 test('a name with a slash makes the subfolders, which open to show the file', async ($, on) => {
   const { ui, written, menu, name } = await mount($, on)
 
-  await menu(2, '1')
+  await menu(2, '3')
   await name('docs/today')
   expect(written).toEqual([`${CWD}/src/docs/today.md`])
   expect(JSON.stringify(await ui.drawn({ in: 'tree' }))).toContain('main.ts')
@@ -117,7 +117,7 @@ test('a name with a slash makes the subfolders, which open to show the file', as
 test('cancel closes the box and writes nothing', async ($, on) => {
   const { ui, written, menu, pane } = await mount($, on)
 
-  await menu(12, '1')
+  await menu(12, '3')
   await ui.press({ key: 'new-cancel' })
   expect(await pane()).not.toContain('New file in ')
   expect(written).toEqual([])
@@ -126,7 +126,7 @@ test('cancel closes the box and writes nothing', async ($, on) => {
 test('right click on a folder: New .md file puts the file inside it, and the folder opens', async ($, on) => {
   const { ui, written, opened, menu, name, pane } = await mount($, on)
 
-  await menu(2, '1')
+  await menu(2, '3')
   expect(await pane()).toContain('src/')
   await name('')
   expect(written).toEqual([`${CWD}/src/file.md`])
@@ -134,7 +134,7 @@ test('right click on a folder: New .md file puts the file inside it, and the fol
   expect(JSON.stringify(await ui.drawn({ in: 'tree' }))).toContain('main.ts')
 })
 
-test('right click on a folder: Open VS Code opens that folder', async ($, on) => {
+test('right click on a folder: Open in vscode opens that folder', async ($, on) => {
   const { opened, menu } = await mount($, on)
 
   await menu(2, '2')
@@ -147,7 +147,7 @@ test('New .md file is offered on a folder and below the rows: not on a file or t
     await ui.pointer({ type: 'down', x: 4, y, button: 'right', in: 'tree' })
     const drawn = JSON.stringify(await ui.drawn({ in: 'tree' }))
     await ui.pointer({ type: 'down', x: 30, y: 25, button: 'left', in: 'tree' })
-    return drawn.includes('New .md file')
+    return drawn.includes('Create new file')
   }
 
   expect(await offered(3)).toBe(false)
@@ -156,7 +156,7 @@ test('New .md file is offered on a folder and below the rows: not on a file or t
   expect(await offered(12)).toBe(true)
 })
 
-test('right click below the last row: Open VS Code opens the outermost folder in VS Code', async ($, on) => {
+test('right click below the last row: Open in vscode opens the outermost folder in VS Code', async ($, on) => {
   const { written, opened, menu } = await mount($, on)
 
   await menu(12, '2')

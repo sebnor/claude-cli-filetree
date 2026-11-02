@@ -60,8 +60,8 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 | Left click on a file | Select it |
 | Double click on a file | Open it: images in the system's default viewer, everything else in your editor |
 | Drag a file left out of the pane and release | Reference it in your prompt (`@path`, at the prompt's cursor); release inside the pane to cancel |
-| Right click on a file | **Insert path** (adds `@path` to your prompt – relative below the session's folder, absolute outside it), **Edit file** |
-| Right click on a folder | **New .md file** (asks for a name, creates the file inside it, then opens it), **Open VS Code** (on that folder) |
+| Right click on a file | **Copy path** (the absolute path, to the clipboard), **Preview** (greyed out – coming for images and markdown), **Open with default** (the system's default app for the file type), **Open in vscode**, **Open in explorer** (the folder it lives in, with the file selected) |
+| Right click on a folder | **Open in explorer**, **Open in vscode** (on that folder), **Create new file** (asks for a name, creates the file inside it, then opens it) |
 | Right click below the last row | The same, for the top folder of the tree |
 | Click anywhere else in the pane | Clear the selection, close the menu |
 | **↑ up** | Show the folder above as the top and pin the tree there (title: `· pinned`); the folder you came from stays open, marked `← cwd` |
@@ -70,9 +70,11 @@ The pane opens by itself at the start of a session once the terminal is wide eno
 
 With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and close folders, `m` opens the menu, `u` moves up (once per press – holding it does not climb on), `s` syncs. In a menu: ↑/↓ or Tab, Enter, or the item's number; `q` or ← closes it.
 
-**New .md file** opens a name box at the top of the pane. A name without an extension gets `.md` (`notes` → `notes.md`), one with an extension keeps it, and `docs/today` creates the subfolder too. An empty name takes the suggested `file.md` (or `file-1.md`, ... when taken). A name that exists or holds characters a file name cannot is refused in the box. **cancel** closes it.
+Moving the mouse out of the tree hands the keyboard back to the prompt, so you can go straight back to typing (it closes and reopens the pane to do so – the plugin API has no other way). Escape does the same without the mouse. Not while the **Create new file** name box is open.
 
-**Editor:** files open in `$VISUAL`, else `$EDITOR`, else VS Code. Use a graphical editor – a terminal editor such as `vim` cannot share Claude Code's terminal. **Open VS Code** always uses VS Code.
+**Create new file** opens a name box at the top of the pane. A name without an extension gets `.md` (`notes` → `notes.md`), one with an extension keeps it, and `docs/today` creates the subfolder too. An empty name takes the suggested `file.md` (or `file-1.md`, ... when taken). A name that exists or holds characters a file name cannot is refused in the box. **cancel** closes it.
+
+**Editor:** files open in `$VISUAL`, else `$EDITOR`, else VS Code. Use a graphical editor – a terminal editor such as `vim` cannot share Claude Code's terminal. **Open in vscode** always uses VS Code. **Open in explorer** uses Explorer on Windows, Finder on macOS and `xdg-open` on the folder elsewhere.
 
 ### Settings
 
@@ -85,7 +87,7 @@ With the tree focused (click it): ↑/↓ move, Enter opens, →/← open and cl
 - One drawing shows at most 1,500 rows (fewer with very long names); collapse folders past that. Only the rows around the visible part of the pane are drawn, so a long tree scrolls without slowing down.
 - Line counts for untracked files are read for at most 200 files per refresh; binary files count as 0.
 - In a folder of projects, up to 200 visible folders are checked for a repository of their own.
-- Dragging a file needs the terminal to pass a held-button drag on to Claude Code. Some terminal multiplexers keep it for their own text selection, and then nothing is dropped; the drop needs only the release, so a terminal that reports presses and releases is enough. Inside such a multiplexer, use **Insert path** from the right-click menu instead.
+- Dragging a file needs the terminal to pass a held-button drag on to Claude Code. Some terminal multiplexers keep it for their own text selection, and then nothing is dropped; the drop needs only the release, so a terminal that reports presses and releases is enough. Inside such a multiplexer, use **Copy path** from the right-click menu and paste it into the prompt instead.
 
 ## Privacy
 

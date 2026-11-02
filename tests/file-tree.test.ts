@@ -150,20 +150,64 @@ for (const { surface, viewport } of POINTER) {
     expect(textOf(await ui.drawn({ in: 'tree' }))).toContain('main.ts')
   })
 
-  test(`${surface}: right click on a file opens the action menu; Edit file opens the editor`, async ($, on) => {
+  test(`${surface}: right click on a file opens the file menu; Open in vscode opens the file`, async ($, on) => {
     const { ui, filled, ran } = await mount($, on)
 
     await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
     const menu = textOf(await ui.drawn({ in: 'tree' }))
-    expect(menu).toContain('Insert path')
-    expect(menu).toContain('Edit file')
+    for (const label of ['Copy path', 'Preview', 'Open with default', 'Open in vscode', 'Open in explorer']) {
+      expect(menu).toContain(label)
+    }
+    expect(menu).not.toContain('Create new file')
     expect(filled).toEqual([])
 
     // Where the menu lands depends on the room below the row: read it off the drawing.
     const { top, left } = menuBox(await ui.drawn({ in: 'tree' }))
-    await ui.pointer({ type: 'down', x: left + 2, y: top + 2, button: 'left', in: 'tree' })
+    await ui.pointer({ type: 'down', x: left + 2, y: top + 4, button: 'left', in: 'tree' })
     expect(ran).toEqual([['code', `${CWD}/README.md`]])
-    expect(textOf(await ui.drawn({ in: 'tree' }))).not.toContain('Edit file')
+    expect(textOf(await ui.drawn({ in: 'tree' }))).not.toContain('Open in vscode')
+  })
+
+  test(`${surface}: Preview is drawn but does nothing: not by click, number or arrows`, async ($, on) => {
+    const { ui, filled, ran } = await mount($, on)
+
+    await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
+    const { top, left } = menuBox(await ui.drawn({ in: 'tree' }))
+    await ui.pointer({ type: 'down', x: left + 2, y: top + 2, button: 'left', in: 'tree' })
+    await ui.key({ key: '2', in: 'tree' })
+    expect(textOf(await ui.drawn({ in: 'tree' }))).toContain('Open in vscode')
+    // Down from Copy path skips Preview: Enter is Open with default.
+    await ui.key({ key: 'down', in: 'tree' })
+    await ui.key({ key: 'return', in: 'tree' })
+    expect(filled).toEqual([])
+    expect(ran).toEqual([['uname'], ['xdg-open', `${CWD}/README.md`]])
+  })
+
+  test(`${surface}: on Windows Open with default goes through start, Open in explorer selects the file`, async ($, on) => {
+    const { ui, ran } = await mount($, on, { OS: 'Windows_NT' })
+
+    await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
+    await ui.key({ key: '3', in: 'tree' })
+    await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
+    await ui.key({ key: '5', in: 'tree' })
+    expect(ran).toEqual([
+      ['cmd', '/c', 'start', '', 'C:\\work\\demo\\README.md'],
+      ['explorer', '/select,', 'C:\\work\\demo\\README.md'],
+    ])
+  })
+
+  test(`${surface}: Copy path puts the file's absolute path on the clipboard`, async ($, on) => {
+    const copied: string[] = []
+    on('ui.copy', ($, e) => {
+      copied.push(e.text)
+      return { value: { isCopied: true } }
+    })
+    const { ui, filled } = await mount($, on, { OS: 'Windows_NT' })
+
+    await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
+    await ui.key({ key: '1', in: 'tree' })
+    expect(copied).toEqual(['C:\\work\\demo\\README.md'])
+    expect(filled).toEqual([])
   })
 
   test(`${surface}: a click on no row, below the rows or on the title, clears the selection`, async ($, on) => {
@@ -186,28 +230,46 @@ for (const { surface, viewport } of POINTER) {
     await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
     await ui.pointer({ type: 'down', x: 30, y: 25, button: 'left', in: 'tree' })
     const drawn = textOf(await ui.drawn({ in: 'tree' }))
-    expect(drawn).not.toContain('Edit file')
+    expect(drawn).not.toContain('Open in vscode')
     expect(drawn).not.toContain('"inverse":true')
   })
 
-  test(`${surface}: the menu works from the keyboard and Insert path fills the prompt`, async ($, on) => {
-    const { ui, filled } = await mount($, on)
-
-    await ui.pointer({ type: 'down', x: 4, y: 3, button: 'right', in: 'tree' })
-    await ui.key({ key: 'down', in: 'tree' })
-    await ui.key({ key: 'up', in: 'tree' })
-    await ui.key({ key: 'return', in: 'tree' })
-    expect(filled).toEqual(['@.env '])
-  })
-
-  test(`${surface}: right click on a folder opens the folder menu: new file, VS Code`, async ($, on) => {
-    const { ui } = await mount($, on)
+  test(`${surface}: right click on a folder opens the folder menu: explorer, VS Code, new file`, async ($, on) => {
+    const { ui, ran } = await mount($, on, { OS: 'Windows_NT' })
 
     await ui.pointer({ type: 'down', x: 4, y: 2, button: 'right', in: 'tree' })
     const drawn = textOf(await ui.drawn({ in: 'tree' }))
-    expect(drawn).toContain('New .md file')
-    expect(drawn).toContain('Open VS Code')
-    expect(drawn).not.toContain('Insert path')
+    for (const label of ['Open in explorer', 'Open in vscode', 'Create new file']) expect(drawn).toContain(label)
+    expect(drawn).not.toContain('Copy path')
+
+    await ui.key({ key: 'return', in: 'tree' })
+    expect(ran).toEqual([['explorer', 'C:\\work\\demo\\src']])
+  })
+
+  test(`${surface}: the pointer leaving the tree closes the menu and hands the keys back`, async ($, on) => {
+    const seen: string[] = []
+    let isFocused = true
+    on('ui.panes', () => ({ value: [{ id: 'file-tree', title: 'Files', isShown: true, isFocused, isPlaced: true }] }))
+    on('ui.close', () => {
+      seen.push('close')
+      return { value: undefined }
+    })
+    on('ui.open', ($, e) => {
+      seen.push(e.focus ? 'open focused' : 'open')
+      return { value: { isPlaced: true } }
+    })
+    const { ui } = await mount($, on)
+
+    await ui.pointer({ type: 'down', x: 4, y: 5, button: 'right', in: 'tree' })
+    await ui.pointer({ type: 'leave', x: 0, y: 5, in: 'tree' })
+    expect(textOf(await ui.drawn({ in: 'tree' }))).not.toContain('Open in vscode')
+    expect(seen).toEqual(['close', 'open'])
+
+    // A pane that does not hold the keys is left alone.
+    isFocused = false
+    await ui.pointer({ type: 'enter', x: 0, y: 5, in: 'tree' })
+    await ui.pointer({ type: 'leave', x: 0, y: 5, in: 'tree' })
+    expect(seen).toEqual(['close', 'open'])
   })
 }
 

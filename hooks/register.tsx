@@ -191,13 +191,13 @@ async function openInEditor($: EngineInterface, path: string) {
   }
 }
 
-// VS Code itself (not $EDITOR) on `dir` (a tree path; `''` the tree's top folder, from the room below
-// the rows); through cmd on Windows for code.cmd.
-async function openFolderInVsCode($: EngineInterface, dir: string) {
+// VS Code itself (not $EDITOR) on `path`, a file or a folder (a tree path; `''` the tree's top
+// folder, from the room below the rows); through cmd on Windows for code.cmd.
+async function openInVsCode($: EngineInterface, path: string) {
   const isWindows = (await $.env.get('OS')) === 'Windows_NT'
-  const folder = join(await rootOf($), dir)
-  const argv = isWindows ? ['cmd', '/c', 'code', folder.replace(/\//g, '\\')] : ['code', folder]
-  $.ui.toast(`Opening ${nameOf(folder)} in VS Code`)
+  const target = join(await rootOf($), path)
+  const argv = isWindows ? ['cmd', '/c', 'code', target.replace(/\//g, '\\')] : ['code', target]
+  $.ui.toast(`Opening ${nameOf(target)} in VS Code`)
   const ran = await $.process.run(argv, { timeoutMs: 15000 }).catch((error: unknown) => ({
     exitCode: -1,
     stderr: String(error),
@@ -228,6 +228,43 @@ async function openWithSystem($: EngineInterface, path: string) {
     const reason = ran.stderr.trim().split('\n')[0] || `exit ${ran.exitCode}`
     $.ui.toast(`Could not open ${path}: ${reason}`)
   }
+}
+
+// The file manager on `path`: a folder opened, a file shown selected in the folder it lives in.
+// Explorer exits 1 even when it opened, so only a failure to start it is reported.
+async function reveal($: EngineInterface, path: string, isDir: boolean) {
+  const target = join(await rootOf($), path)
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT'
+  const isMac = !isWindows && (await $.process.run(['uname']).catch(() => undefined))?.stdout.trim() === 'Darwin'
+  const argv = isWindows
+    ? ['explorer', ...(isDir ? [] : ['/select,']), target.replace(/\//g, '\\')]
+    : isMac
+      ? ['open', ...(isDir ? [] : ['-R']), target]
+      : ['xdg-open', isDir ? target : (parentOf(target) ?? target)]
+  $.ui.toast(`Opening ${nameOf(target)} in the file manager`)
+  await $.process.run(argv, { timeoutMs: 15000 }).catch((error: unknown) => {
+    $.ui.toast(`Could not open the file manager: ${String(error).split('\n')[0]}`)
+  })
+}
+
+// The file's absolute path on the clipboard, as the system spells it (backslashes on Windows).
+async function copyPath($: EngineInterface, path: string) {
+  const file = join(await rootOf($), path)
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT'
+  const text = isWindows ? file.replace(/\//g, '\\') : file
+  const copied = await $.ui.copy({ text }).catch((error: unknown) => ({ isCopied: false as const, reason: String(error) }))
+  $.ui.toast(copied.isCopied ? `Copied ${text}` : `Could not copy the path: ${copied.reason}`)
+}
+
+// The pointer left the tree: where the pane holds the keyboard, closing and reopening it (no focus
+// asked) gives the keys back to the prompt – the plugin API has no other way to hand them back.
+// Not while the name box is open: it is drawn outside the tree, so the pointer leaves to reach it.
+async function releaseKeys($: EngineInterface) {
+  if ((await read($, newFile)).isOpen) return
+  const pane = (await $.ui.panes()).find(one => one.id === PANE)
+  if (!pane?.isFocused) return
+  await $.ui.close({ id: PANE })
+  await $.ui.open({ id: PANE, title: TITLE })
 }
 
 const inDir = (dir: string, name: string) => (dir === '' ? name : `${dir}/${name}`)
@@ -418,12 +455,16 @@ export const register: Register = (on, options) => {
     // An opened folder may hold a repository of its own: look now, not at the next poll.
     if (action === 'toggle') await toggle($, path).then(() => void refreshGit($).catch(() => undefined))
     else if (action === 'insert') await insertPath($, path)
-    else if (action === 'edit') void openInEditor($, path)
+    else if (action === 'copy') await copyPath($, path)
     else if (action === 'open') void openFile($, path)
+    else if (action === 'open-default') void openWithSystem($, path)
+    else if (action === 'reveal') void reveal($, path, true)
+    else if (action === 'reveal-file') void reveal($, path, false)
+    else if (action === 'release') await releaseKeys($)
     else if (action === 'refresh') await refreshAll($)
     else if (action === 'collapse') await collapseAll($)
     else if (action === 'new-md') await openNewFile($, path)
-    else if (action === 'open-vscode') void openFolderInVsCode($, path)
+    else if (action === 'open-vscode') void openInVsCode($, path)
     else if (action === 'up') {
       // From the keyboard, one step per press: a held key's repeats arrive closer than a person presses.
       const now = Date.now()

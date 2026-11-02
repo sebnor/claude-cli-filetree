@@ -31,7 +31,8 @@ export type TreeProps = {
   bodyRows: number
 }
 export type TreeAction =
-  | 'toggle' | 'insert' | 'edit' | 'open' | 'refresh' | 'collapse' | 'new-md' | 'open-vscode' | 'up' | 'sync'
+  | 'toggle' | 'insert' | 'copy' | 'preview' | 'open' | 'open-default' | 'reveal' | 'reveal-file' | 'open-vscode'
+  | 'new-md' | 'refresh' | 'collapse' | 'up' | 'sync' | 'release'
 export type TreeMessage = { action: TreeAction; path: string }
 
 /**
@@ -82,17 +83,22 @@ function headerActions(canGoUp: boolean, isPinned: boolean) {
   })
 }
 
-type MenuItem = { label: string; action: TreeAction }
+/** `isDisabled` draws the item dim and skips it: a click, Enter or its number does nothing. */
+type MenuItem = { label: string; action: TreeAction; isDisabled?: true }
 
 // A file's menu, and a folder's: new files go into the folder, VS Code opens on it. The empty room below the rows
-// stands for the cwd, the outermost folder, and has the folder's menu.
+// stands for the cwd, the outermost folder, and has the folder's menu. Preview is to come (images, markdown).
 const FILE_MENU: readonly MenuItem[] = [
-  { label: 'Insert path', action: 'insert' },
-  { label: 'Edit file', action: 'edit' },
+  { label: 'Copy path', action: 'copy' },
+  { label: 'Preview', action: 'preview', isDisabled: true },
+  { label: 'Open with default', action: 'open-default' },
+  { label: 'Open in vscode', action: 'open-vscode' },
+  { label: 'Open in explorer', action: 'reveal-file' },
 ]
 const FOLDER_MENU: readonly MenuItem[] = [
-  { label: 'New .md file', action: 'new-md' },
-  { label: 'Open VS Code', action: 'open-vscode' },
+  { label: 'Open in explorer', action: 'reveal' },
+  { label: 'Open in vscode', action: 'open-vscode' },
+  { label: 'Create new file', action: 'new-md' },
 ]
 const MENU_INNER = Math.max(...[...FILE_MENU, ...FOLDER_MENU].map(item => item.label.length)) + 4
 const MENU_WIDTH = MENU_INNER + 2
@@ -102,6 +108,15 @@ const INITIAL: State = { cursor: 0, hasSelection: false }
 const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
 
 const itemsFor = (menu: Menu, rows: readonly TreeRow[]) => (rows[menu.row]?.[2] === 'f' ? FILE_MENU : FOLDER_MENU)
+
+/** The next item from `from` that is not disabled, stepping by `step` (1 down, -1 up) and wrapping. */
+const stepMenu = (items: readonly MenuItem[], from: number, step: 1 | -1) => {
+  for (let n = 1; n <= items.length; n++) {
+    const index = (from + step * n + items.length * n) % items.length
+    if (!items[index]?.isDisabled) return index
+  }
+  return from
+}
 
 // In region cells: below the row (or the click) when it fits, else above; never past the right edge.
 const placeMenu = (menu: Menu, items: readonly MenuItem[], columns: number, height: number) => {
@@ -139,8 +154,8 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
   const openEmptyMenu = (x: number, y: number) => set({ cursor, hasSelection: false, menu: { row: -1, x, y, selected: 0 } })
   const choose = (menu: Menu, index: number) => {
     const item = itemsFor(menu, rows)[index]
+    if (!item || item.isDisabled) return
     set({ ...state, menu: undefined })
-    if (!item) return
     if (menu.row < 0) return act('', item.action)
     const row = rows[menu.row]
     if (row) act(row[0], item.action)
@@ -161,6 +176,13 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
 
   surface.onPointer(event => {
     const menu = state.menu
+    // The pointer left the tree (for the conversation, the prompt): the menu closes, and the pane
+    // hands the keyboard back, so typing goes to the prompt. Not mid-press: a drag holds the pointer.
+    if (event.type === 'leave') {
+      if (state.pressed || state.drag) return
+      if (menu) set({ ...state, menu: undefined })
+      return act('', 'release')
+    }
     // Hover over the open menu moves its highlight, where the terminal reports motion.
     if (event.type === 'move' && event.button === undefined) {
       const index = menu && menuItemAt(menu, event)
@@ -235,8 +257,9 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
     const menu = state.menu
     if (menu) {
       const count = itemsFor(menu, rows).length
-      if (event.key === 'up') set({ ...state, menu: { ...menu, selected: (menu.selected + count - 1) % count } })
-      else if (event.key === 'down' || event.key === 'tab') set({ ...state, menu: { ...menu, selected: (menu.selected + 1) % count } })
+      const items = itemsFor(menu, rows)
+      if (event.key === 'up') set({ ...state, menu: { ...menu, selected: stepMenu(items, menu.selected, -1) } })
+      else if (event.key === 'down' || event.key === 'tab') set({ ...state, menu: { ...menu, selected: stepMenu(items, menu.selected, 1) } })
       else if (event.key === 'return') choose(menu, menu.selected)
       else if (/^[1-9]$/.test(event.key) && Number(event.key) <= count) choose(menu, Number(event.key) - 1)
       else if (event.key === 'q' || event.key === 'left' || event.key === 'backspace') set({ ...state, menu: undefined })
@@ -341,7 +364,9 @@ const TreeView: ClientModule<JsonValue, State> = (props, surface) => {
           borderColor="cyan"
         >
           {menuItems.map((item, index) => (
-            <Text inverse={index === menu.selected}>{` ${index + 1}  ${item.label}`.padEnd(MENU_INNER)}</Text>
+            <Text inverse={index === menu.selected && !item.isDisabled} dimColor={item.isDisabled}>
+              {` ${index + 1}  ${item.label}`.padEnd(MENU_INNER)}
+            </Text>
           ))}
         </Box>
       )}
